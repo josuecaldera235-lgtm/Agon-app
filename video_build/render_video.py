@@ -39,7 +39,8 @@ def load_src(path):
     return im.resize((CW, CH), Image.Resampling.LANCZOS)
 
 SRCS = [load_src(f'video_build/key_block{i}.jpg') for i in (1, 2, 3, 4)]
-print('fuentes cargadas', [s.size for s in SRCS], flush=True)
+END = Image.open('video_build/endcard.png').convert('RGB').resize((CW, CH), Image.Resampling.LANCZOS)
+print('fuentes cargadas', [s.size for s in SRCS], '+ endcard', END.size, flush=True)
 
 # ---------------------------------------------------------------- grading LUT (gótico cálido)
 def curve(pts):
@@ -191,19 +192,64 @@ MAGMA = [(0.0, (255, 232, 168)), (0.35, (255, 168, 60)), (0.7, (238, 84, 8)),
          (1.0, (140, 16, 0))]
 BONE = [(0.0, (255, 244, 224)), (1.0, (216, 186, 150))]
 SILVER = [(0.0, (238, 230, 218)), (1.0, (168, 152, 136))]
+GOLDBONE = [(0.0, (255, 240, 200)), (1.0, (228, 168, 88))]
+
+def make_plaque(text, size, maxw, y, tracking=10, glow_amp=0.5):
+    """Placa dorada con texto rojo oscuro (banner REGGAETON VERSION)."""
+    fs = size
+    while True:
+        font = ImageFont.truetype(FONT_SERIF, fs)
+        mS, mC = render_mask(text, font, tracking, 1)
+        if mS.shape[1] <= maxw or fs <= 18:
+            break
+        fs -= 2
+    th, tw = mS.shape
+    px, py = 30, 14
+    pw, ph = tw + 2 * px, th + 2 * py
+    plq = Image.new('L', (pw, ph), 0)
+    ImageDraw.Draw(plq).rounded_rectangle([0, 0, pw - 1, ph - 1], radius=11,
+                                          fill=255, outline=120, width=2)
+    pa = np.asarray(plq).astype(np.float32) / 255.0
+    prgb = np.zeros((ph, pw, 3), dtype=np.float32)
+    ys = np.arange(ph, dtype=np.float32)
+    for c, stops in enumerate([(252, 236, 158), (232, 182, 96), (170, 90, 32)]):
+        prgb[:, :, c] = np.interp(ys, [0, ph * 0.5, ph - 1], stops)[:, None]
+    prgb *= (0.84 + 0.16 * (pa[:, :, None]))
+    ta = np.zeros((ph, pw), dtype=np.float32)
+    ta[py:py + th, px:px + tw] = mS
+    tc = np.zeros((ph, pw), dtype=np.float32)
+    tc[py:py + th, px:px + tw] = mC
+    trgb = np.zeros((ph, pw, 3), dtype=np.float32)
+    trgb[:] = np.array([96, 8, 4], dtype=np.float32)
+    out_a = np.clip(pa + ta * (1 - pa), 0, 1)
+    out_rgb = (prgb * (pa * (1 - ta))[:, :, None] + trgb * ta[:, :, None]) / np.maximum(out_a, 1e-6)[:, :, None]
+    aimg = Image.fromarray((out_a * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(10))
+    glow = (np.asarray(aimg).astype(np.float32) / 255.0 * glow_amp)[:, :, None] * np.array((255, 110, 25), dtype=np.float32)[None, None, :]
+    return {'rgb': out_rgb, 'a': out_a, 'glow': glow, 'w': pw, 'h': ph,
+            'x': (W - pw) // 2, 'y': y}
 
 print('renderizando textos...', flush=True)
 TITLE = make_item('THE FIRE OF TERROR', 92, FIRE, tracking=7, stroke_w=4,
                   maxw=1000, y=252, glow_r=18, glow_col=(255, 96, 14), glow_amp=0.62)
+BANNER = make_plaque('REGGAETON VERSION', 48, 880, y=352, tracking=10, glow_amp=0.55)
 DATE = make_item('31 DE OCTUBRE', 72, MAGMA, tracking=10, stroke_w=3,
-                 maxw=940, y=1400, glow_r=13, glow_col=(255, 80, 10), glow_amp=0.55)
-DJS = make_item('DJ SOMBRÍO • DJ KHAOS • MC CALAVERA', 40, BONE, tracking=8,
-                stroke_w=1, maxw=980, y=1560, glow_r=10, glow_col=(255, 120, 30), glow_amp=0.5,
+                 maxw=940, y=1396, glow_r=13, glow_col=(255, 80, 10), glow_amp=0.55)
+VENUE = make_item('DISCO EL EMPERADOR', 42, GOLDBONE, tracking=8, stroke_w=2,
+                  maxw=900, y=1486, glow_r=9, glow_col=(255, 120, 30), glow_amp=0.45,
+                  font_path=FONT_SANS)
+DJS = make_item('JESUS TORRES • KENN DJ • JESUS MADERO', 38, BONE, tracking=8,
+                stroke_w=1, maxw=980, y=1558, glow_r=10, glow_col=(255, 120, 30), glow_amp=0.5,
                 font_path=FONT_SANS)
-LOGOS = make_item('LA CATACUMBA  •  OCCULT SOUND  •  TERROR NIGHTS', 26, SILVER,
-                  tracking=6, stroke_w=0, maxw=980, y=1708, glow_r=8,
+SPECIAL = make_item('(SPECIAL SET)', 26, SILVER, tracking=6, stroke_w=1,
+                    maxw=900, y=1620, glow_r=6, glow_col=(255, 110, 30), glow_amp=0.3,
+                    font_path=FONT_SANS)
+EXTRA = make_item('PREMIOS: PRIMER LUGAR 300$ • OPEN DOOR 9:00PM', 26, BONE,
+                  tracking=5, stroke_w=1, maxw=1010, y=1666, glow_r=6,
+                  glow_col=(255, 110, 30), glow_amp=0.3, font_path=FONT_SANS)
+LOGOS = make_item('ELEMENTS EVENTS  •  DISCO EL EMPERADOR', 26, SILVER,
+                  tracking=6, stroke_w=0, maxw=960, y=1718, glow_r=8,
                   glow_col=(255, 110, 30), glow_amp=0.35, font_path=FONT_SANS, rules=True)
-print('textos OK:', [(it['w'], it['h']) for it in (TITLE, DATE, DJS, LOGOS)], flush=True)
+print('textos OK:', [(it['w'], it['h']) for it in (TITLE, BANNER, DATE, VENUE, DJS, SPECIAL, EXTRA, LOGOS)], flush=True)
 
 def composite_item(img, it, alpha_scale, dy=0.0, glow_scale=1.0):
     if alpha_scale <= 0.004:
@@ -273,6 +319,22 @@ def cam_box(seg, t):
 
 SEG_IDX = lambda t: 0 if t < 7.5 else (1 if t < 15.0 else (2 if t < 22.5 else 3))
 
+T_XF0, T_XF1 = 24.9, 25.7          # fundido hacia el flyer real
+
+def endcard_box(t):
+    """Push-in lento sobre el flyer final (póster estático animado)."""
+    s = 1.0 + 0.05 * ease_io(min(max((t - T_XF1) / 4.2, 0.0), 1.0))
+    cw_, ch_ = CW / s, CH / s
+    l = (CW - cw_) / 2
+    up = (CH - ch_) / 2
+    return int(l), int(up), int(l + cw_), int(up + ch_)
+
+def overlay_fade(t):
+    if t < T_XF0:
+        return 1.0
+    u = min(max((t - T_XF0) / (T_XF1 - T_XF0), 0.0), 1.0)
+    return 1.0 - (u * u * (3 - 2 * u))
+
 def base_frame(t):
     seg = SEG_IDX(t)
     box = cam_box(seg, t)
@@ -282,6 +344,15 @@ def base_frame(t):
     fl[:, :, 0] = LUT_R[a[:, :, 0]]
     fl[:, :, 1] = LUT_G[a[:, :, 1]]
     fl[:, :, 2] = LUT_B[a[:, :, 2]]
+    # fundido hacia la end-card (flyer real) en el bloque 4
+    if seg == 3 and t > T_XF0:
+        al = overlay_fade(t)          # 1 -> 0
+        w_ = 1.0 - al
+        e = np.asarray(END.crop(endcard_box(t)).resize((W, H), Image.Resampling.LANCZOS), dtype=np.uint8)
+        fl[:, :, 0] = fl[:, :, 0] * al + LUT_R[e[:, :, 0]] * w_
+        fl[:, :, 1] = fl[:, :, 1] * al + LUT_G[e[:, :, 1]] * w_
+        fl[:, :, 2] = fl[:, :, 2] * al + LUT_B[e[:, :, 2]] * w_
+        return fl
     # fundido corto entre bloques
     for tb in T_BLOCKS:
         dt = t - tb
@@ -325,8 +396,8 @@ for fi in range(NF):
     xoff = int(t * 16) % W
     img += (SMOKE[:, xoff:xoff + W] * SMOKE_ROW)[:, :, None] * SMOKE_TINT[None, None, :] * 9.0
 
-    # pulso del corazón de rubí (post 22.5)
-    if t > 22.5:
+    # pulso del corazón de rubí (post 22.5, hasta que aparece el flyer)
+    if 22.5 < t < T_XF1:
         p = max(0.0, np.sin(6.283 * 1.15 * (t - 22.5))) ** 1.6
         img[:, :, 0] *= 1 + 0.05 * p
         img[:, :, 1] *= 1 + 0.012 * p
@@ -334,36 +405,62 @@ for fi in range(NF):
     # brasas
     draw_embers(img, t)
 
-    # ---------- textos ----------
-    # título: cae del cielo 8.30 -> 9.40, flicker, pulso posterior
-    aT, dA = alpha_window(t, 8.30, 9.40)
-    if aT > 0:
-        dy = -170 * dA
-        flick = 0.965 + 0.035 * np.sin(6.283 * 8.1 * t) + 0.02 * rng.uniform(-1, 1)
-        glow = 1.0 + dA * 1.6
-        if t > 22.5:
-            glow += 0.55 * (max(0.0, np.sin(6.283 * 1.15 * (t - 22.5))) ** 1.6)
-        composite_item(img, TITLE, min(1.0, aT * flick), dy, glow)
-        img *= (BAND_TOP[:, None, None] * aT + (1 - aT))
-    # fecha magma: brota 15.90 -> 17.10
-    aD, dD = alpha_window(t, 15.90, 17.10)
-    if aD > 0:
-        g = 0.9 + dD * 1.5
-        if t > 22.5:
-            g += 0.30 * (max(0.0, np.sin(6.283 * 1.15 * (t - 22.5))) ** 1.6)
-        composite_item(img, DATE, aD, 110 * dD, g)
-    # DJs
-    aJ, dJ = alpha_window(t, 16.15, 17.35)
-    if aJ > 0:
-        composite_item(img, DJS, aJ, 70 * dJ, 0.55)
-    # logos inferiores
-    aL, _ = alpha_window(t, 23.20, 24.20)
-    if aL > 0:
-        composite_item(img, LOGOS, aL, 0.0, 0.35)
-    # banda inferior de legibilidad cuando hay textos abajo
-    aB = max(aD, aJ, aL)
-    if aB > 0:
-        img *= (BAND_BOT[:, None, None] * aB + (1 - aB))
+    # ---------- textos (se funden al aparecer el flyer real) ----------
+    ov = overlay_fade(t)
+    if ov > 0.01:
+        # título: cae del cielo 8.30 -> 9.40, flicker, pulso posterior
+        aT, dA = alpha_window(t, 8.30, 9.40)
+        aT *= ov
+        if aT > 0:
+            dy = -170 * dA
+            flick = 0.965 + 0.035 * np.sin(6.283 * 8.1 * t) + 0.02 * rng.uniform(-1, 1)
+            glow = 1.0 + dA * 1.6
+            if 22.5 < t < T_XF1:
+                glow += 0.55 * (max(0.0, np.sin(6.283 * 1.15 * (t - 22.5))) ** 1.6)
+            composite_item(img, TITLE, min(1.0, aT * flick), dy, glow)
+            img *= (BAND_TOP[:, None, None] * aT + (1 - aT))
+        # banner REGGAETON VERSION: 9.70 -> 10.45
+        aN, dN = alpha_window(t, 9.70, 10.45)
+        aN *= ov
+        if aN > 0:
+            composite_item(img, BANNER, aN, -28 * dN, 0.9 + dN * 1.2)
+        # fecha magma: brota 15.90 -> 17.10
+        aD, dD = alpha_window(t, 15.90, 17.10)
+        aD *= ov
+        if aD > 0:
+            g = 0.9 + dD * 1.5
+            if 22.5 < t < T_XF1:
+                g += 0.30 * (max(0.0, np.sin(6.283 * 1.15 * (t - 22.5))) ** 1.6)
+            composite_item(img, DATE, aD, 110 * dD, g)
+        # venue
+        aV, dV = alpha_window(t, 16.05, 17.25)
+        aV *= ov
+        if aV > 0:
+            composite_item(img, VENUE, aV, 80 * dV, 0.6)
+        # DJs
+        aJ, dJ = alpha_window(t, 16.15, 17.35)
+        aJ *= ov
+        if aJ > 0:
+            composite_item(img, DJS, aJ, 70 * dJ, 0.55)
+        # special set
+        aS, dS = alpha_window(t, 16.35, 17.55)
+        aS *= ov
+        if aS > 0:
+            composite_item(img, SPECIAL, aS, 40 * dS, 0.4)
+        # premios / open door
+        aX, _ = alpha_window(t, 23.25, 24.25)
+        aX *= ov
+        if aX > 0:
+            composite_item(img, EXTRA, aX, 0.0, 0.35)
+        # logos inferiores
+        aL, _ = alpha_window(t, 23.20, 24.20)
+        aL *= ov
+        if aL > 0:
+            composite_item(img, LOGOS, aL, 0.0, 0.35)
+        # banda inferior de legibilidad cuando hay textos abajo
+        aB = max(aD, aJ, aL, aV, aX)
+        if aB > 0:
+            img *= (BAND_BOT[:, None, None] * min(aB, 1.0) + (1 - min(aB, 1.0)))
 
     # flash ígneo final
     if t > 28.55:
